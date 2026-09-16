@@ -37,7 +37,11 @@ def create_news_short():
     print("🎬 Creating latest Matchwire Short...")
 
     subprocess.run(
-        ["python", "youtube_news_short.py"],
+        [
+            "/home/dj/football-bot/venv/bin/python",
+            "youtube_news_short.py",
+            "--skip-seen"
+        ],
         check=True
     )
 
@@ -66,12 +70,12 @@ def get_latest_story():
 
 def fetch_latest_story():
     """
-    Fetch the latest story metadata without rendering the video.
+    Fetch the best suitable football story that has not been uploaded yet.
     """
     print("🔎 Checking latest football news...")
 
     subprocess.run(
-        ["python", "youtube_news_short.py", "--metadata-only"],
+        ["/home/dj/football-bot/venv/bin/python", "youtube_news_short.py", "--metadata-only", "--skip-seen"],
         check=True
     )
 

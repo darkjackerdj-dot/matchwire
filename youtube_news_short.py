@@ -4,6 +4,7 @@ import feedparser
 import html
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 import textwrap
 from PIL import Image, ImageDraw, ImageFont
@@ -85,6 +86,175 @@ def wrap_lines(text, width):
 # GET NEWS
 # ==========================================
 
+
+def get_besoccer_news():
+    import requests
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin
+
+    articles = []
+
+    url = "https://www.besoccer.com/news/latest"
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/140.0.0.0 Safari/537.36"
+        ),
+        "Accept": (
+            "text/html,application/xhtml+xml,"
+            "application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.google.com/",
+    }
+
+    try:
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=20
+        )
+
+        response.raise_for_status()
+
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser"
+        )
+
+        for item in soup.select(
+            "li.news-vertical, li.news-horizontal"
+        ):
+            link_tag = item.select_one(
+                "a.news[href]"
+            )
+
+            headline = item.select_one(
+                'h3[itemprop="headline"]'
+            )
+
+            teaser = item.select_one(
+                "p.teaser"
+            )
+
+            published = item.select_one(
+                'meta[itemprop="datePublished"]'
+            )
+
+            if not link_tag or not headline:
+                continue
+
+            title = clean_text(
+                headline.get_text(" ", strip=True)
+            )
+
+            link = urljoin(
+                url,
+                link_tag.get("href", "")
+            )
+
+            summary = ""
+
+            if teaser:
+                summary = clean_text(
+                    teaser.get_text(" ", strip=True)
+                )
+
+            published_dt = None
+
+            if published:
+                raw_date = published.get(
+                    "content",
+                    ""
+                ).strip()
+
+                if raw_date:
+                    try:
+                        published_dt = datetime.fromisoformat(
+                            raw_date.replace(
+                                "Z",
+                                "+00:00"
+                            )
+                        )
+                    except Exception:
+                        published_dt = None
+
+            if not title or not link:
+                continue
+
+            # BeSoccer is football-only.
+            # No FOOTBALL_WORDS filter.
+
+            score = 4
+
+            text_lower = (
+                f"{title} {summary}"
+            ).lower()
+
+            # BeSoccer scoring keywords.
+            # No football keyword filter is applied.
+            besoccer_news_words = [
+                "transfer", "signed", "signs", "joins", "leaves",
+                "appointed", "sacked", "injury", "injured",
+                "returns", "contract", "deal", "agrees",
+                "confirmed", "announced", "goal", "goals",
+                "win", "wins", "defeat", "draw", "match",
+                "champions league", "premier league",
+                "europa league", "world cup", "cup",
+                "manager", "managerial"
+            ]
+
+            for word in besoccer_news_words:
+                if word in text_lower:
+                    score += 2
+
+            if len(summary) >= 120:
+                score += 2
+
+            if len(summary) >= 250:
+                score += 1
+
+            if len(title) >= 45:
+                score += 1
+
+            if published_dt:
+                age_hours = (
+                    datetime.now(timezone.utc)
+                    - published_dt
+                ).total_seconds() / 3600
+
+                if age_hours > 48:
+                    continue
+
+                if age_hours <= 6:
+                    score += 8
+                elif age_hours <= 12:
+                    score += 6
+                elif age_hours <= 24:
+                    score += 4
+                elif age_hours <= 36:
+                    score += 2
+
+            articles.append({
+                "source": "BeSoccer",
+                "title": title,
+                "summary": summary,
+                "link": link,
+                "score": score
+            })
+
+        print(
+            f"   ✅ BeSoccer ({len(articles)} articles)"
+        )
+
+    except Exception as e:
+        print(f"   ⚠️ BeSoccer: {e}")
+
+    return articles
+
+
 def get_latest_news():
 
     articles = []
@@ -160,6 +330,58 @@ def get_latest_news():
                 if len(title) >= 45:
                     score += 1
 
+                # Freshness scoring
+                published_time = entry.get("published_parsed")
+
+                if published_time:
+                    try:
+                        published_dt = datetime(
+                            *published_time[:6],
+                            tzinfo=timezone.utc
+                        )
+
+                        age_hours = (
+                            datetime.now(timezone.utc) - published_dt
+                        ).total_seconds() / 3600
+
+                        # Ignore stories older than 48 hours
+                        if age_hours > 48:
+                            continue
+
+                        # Give newer stories a stronger priority
+                        if age_hours <= 6:
+                            score += 8
+                        elif age_hours <= 12:
+                            score += 6
+                        elif age_hours <= 24:
+                            score += 4
+                        elif age_hours <= 36:
+                            score += 2
+
+                    except Exception:
+                        pass
+
+                # When running through YouTube automation, skip stories
+                # that have already been uploaded and continue to the next one.
+                if "--skip-seen" in sys.argv:
+                    seen_file = Path("youtube_seen.json")
+                    if seen_file.exists():
+                        try:
+                            seen = json.loads(
+                                seen_file.read_text()
+                            )
+                        except Exception:
+                            seen = []
+
+                        story_key = (
+                            title.strip().lower()
+                            + "|"
+                            + link.strip()
+                        )
+
+                        if story_key in seen:
+                            continue
+
                 articles.append({
                     "source": source,
                     "title": title,
@@ -172,6 +394,11 @@ def get_latest_news():
 
         except Exception as e:
             print(f"   ⚠️ {source}: {e}")
+
+    # Add BeSoccer separately.
+    # BeSoccer is football-only, so no
+    # FOOTBALL_WORDS filter is applied.
+    articles.extend(get_besoccer_news())
 
     if not articles:
         raise RuntimeError(
