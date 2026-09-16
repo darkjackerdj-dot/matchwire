@@ -91,13 +91,32 @@ def get_latest_news():
 
     print("📰 Checking Matchwire sources...")
 
+    # Words that usually indicate low-value or speculative stories
+    LOW_VALUE_WORDS = [
+        "rumour", "rumor", "gossip", "quiz", "rating",
+        "ratings", "predicted", "prediction", "dream team",
+        "best xi", "power ranking", "reaction", "opinion",
+        "watch", "live blog", "explained", "explainer"
+    ]
+
+    # Strong news signals
+    NEWS_WORDS = [
+        "transfer", "signed", "signs", "joins", "leaves",
+        "appointed", "sacked", "injury", "injured",
+        "returns", "contract", "deal", "agrees",
+        "confirmed", "announced", "goal", "goals",
+        "win", "wins", "defeat", "draw", "match",
+        "champions league", "premier league", "europa league",
+        "world cup", "cup", "manager", "managerial"
+    ]
+
     for source, url in FEEDS:
 
         try:
 
             feed = feedparser.parse(url)
 
-            for entry in feed.entries[:10]:
+            for entry in feed.entries[:20]:
 
                 title = clean_text(
                     entry.get("title", "")
@@ -116,11 +135,37 @@ def get_latest_news():
                 if not is_football(title, summary):
                     continue
 
+                text_lower = f"{title} {summary}".lower()
+
+                # Skip obvious low-value/speculative stories
+                if any(word in text_lower for word in LOW_VALUE_WORDS):
+                    continue
+
+                # Calculate a simple news-quality score
+                score = 0
+
+                # Strong football-news signals
+                for word in NEWS_WORDS:
+                    if word in text_lower:
+                        score += 2
+
+                # Prefer stories with useful summaries
+                if len(summary) >= 120:
+                    score += 2
+
+                if len(summary) >= 250:
+                    score += 1
+
+                # Prefer specific headlines over very short ones
+                if len(title) >= 45:
+                    score += 1
+
                 articles.append({
                     "source": source,
                     "title": title,
                     "summary": summary,
-                    "link": link
+                    "link": link,
+                    "score": score
                 })
 
             print(f"   ✅ {source}")
@@ -130,10 +175,21 @@ def get_latest_news():
 
     if not articles:
         raise RuntimeError(
-            "No football news found."
+            "No suitable football news found."
         )
 
-    return articles[0]
+    # Highest-quality story first.
+    # Original RSS order is used as the tie-breaker.
+    articles.sort(
+        key=lambda article: article["score"],
+        reverse=True
+    )
+
+    selected = articles[0]
+
+    print(f"   🎯 Quality score: {selected['score']}")
+
+    return selected
 
 
 # ==========================================
