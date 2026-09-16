@@ -24,6 +24,10 @@ FEEDS = [
     ("BBC Sport", "https://feeds.bbci.co.uk/sport/football/rss.xml"),
     ("ESPN", "https://www.espn.com/espn/rss/soccer/news"),
     ("The Guardian", "https://www.theguardian.com/football/rss"),
+    ("SoccerNews", "https://www.soccernews.com/feed"),
+    ("NYT Soccer", "https://rss.nytimes.com/services/xml/rss/nyt/Soccer.xml"),
+    ("The Hindu Football", "https://www.thehindu.com/sport/football/feeder/default.rss"),
+    ("Sky Sports Football", "https://www.skysports.com/rss/12040"),
 ]
 
 FOOTBALL_WORDS = [
@@ -398,7 +402,38 @@ def get_latest_news():
     # Add BeSoccer separately.
     # BeSoccer is football-only, so no
     # FOOTBALL_WORDS filter is applied.
-    articles.extend(get_besoccer_news())
+    besoccer_articles = get_besoccer_news()
+
+    # Apply the same YouTube duplicate-history protection
+    # to BeSoccer stories.
+    if "--skip-seen" in sys.argv:
+        seen_file = Path("youtube_seen.json")
+
+        if seen_file.exists():
+            try:
+                seen = json.loads(seen_file.read_text())
+            except Exception:
+                seen = []
+        else:
+            seen = []
+
+        filtered_besoccer = []
+
+        for article in besoccer_articles:
+            story_key = (
+                article["title"].strip().lower()
+                + "|"
+                + article["link"].strip()
+            )
+
+            if story_key in seen:
+                continue
+
+            filtered_besoccer.append(article)
+
+        besoccer_articles = filtered_besoccer
+
+    articles.extend(besoccer_articles)
 
     if not articles:
         raise RuntimeError(
@@ -815,7 +850,40 @@ def main():
     print("=================================")
     print()
 
-    article = get_latest_news()
+    article = None
+
+    # Queue mode: render the exact story supplied by the
+    # YouTube queue client instead of selecting a new story.
+    if "--story-file" in sys.argv:
+        try:
+            index = sys.argv.index("--story-file")
+
+            if index + 1 >= len(sys.argv):
+                raise RuntimeError("Missing story file path")
+
+            story_file = Path(sys.argv[index + 1])
+
+            article = json.loads(
+                story_file.read_text()
+            )
+
+            required = ["title", "source", "link"]
+
+            for field in required:
+                if field not in article:
+                    raise RuntimeError(
+                        f"Queued story missing field: {field}"
+                    )
+
+            print("📦 Queue story loaded.")
+
+        except Exception as e:
+            raise RuntimeError(
+                f"Could not load queued story: {e}"
+            )
+
+    else:
+        article = get_latest_news()
 
     print()
     Path("matchwire_latest.json").write_text(

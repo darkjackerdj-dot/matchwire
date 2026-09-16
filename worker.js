@@ -11,6 +11,22 @@ const SOURCES = [
     name: "The Guardian",
     url: "https://www.theguardian.com/football/rss",
   },
+  {
+    name: "SoccerNews",
+    url: "https://www.soccernews.com/feed",
+  },
+  {
+    name: "NYT Soccer",
+    url: "https://rss.nytimes.com/services/xml/rss/nyt/Soccer.xml",
+  },
+  {
+    name: "The Hindu Football",
+    url: "https://www.thehindu.com/sport/football/feeder/default.rss",
+  },
+  {
+    name: "Sky Sports Football",
+    url: "https://www.skysports.com/rss/12040",
+  },
 ];
 
 const MAX_ARTICLES_PER_SOURCE = 20;
@@ -432,6 +448,65 @@ async function saveSeenNews(env, seen) {
   );
 }
 
+
+async function getYouTubeQueue(env) {
+  const data = await env.MATCHWIRE_KV.get("youtube_queue");
+
+  if (!data) {
+    return [];
+  }
+
+  try {
+    return JSON.parse(data);
+  } catch {
+    return [];
+  }
+}
+
+async function saveYouTubeQueue(env, queue) {
+  const trimmed = queue.slice(-500);
+
+  await env.MATCHWIRE_KV.put(
+    "youtube_queue",
+    JSON.stringify(trimmed)
+  );
+}
+
+async function addToYouTubeQueue(env, articles) {
+  if (!articles.length) {
+    return;
+  }
+
+  const queue = await getYouTubeQueue(env);
+  const existing = new Set(
+    queue.map((article) => article.key)
+  );
+
+  for (const article of articles) {
+    if (existing.has(article.key)) {
+      continue;
+    }
+
+    queue.push({
+      key: article.key,
+      title: article.title,
+      source: article.source,
+      link: article.link,
+      published: article.published || "",
+      image: article.image || null,
+      queued_at: new Date().toISOString(),
+    });
+
+    existing.add(article.key);
+  }
+
+  await saveYouTubeQueue(env, queue);
+
+  console.log(
+    `YouTube queue: ${queue.length} stories stored`
+  );
+}
+
 async function processNews(env) {
   console.log("=================================");
   console.log("MATCHWIRE NEWS CHECK");
@@ -470,6 +545,15 @@ async function processNews(env) {
   }
 
   console.log(`New articles: ${newArticles.length}`);
+
+  // Keep newly discovered football stories in the
+  // Cloudflare queue so the local YouTube uploader can
+  // catch them up when the PC comes back online.
+  try {
+    await addToYouTubeQueue(env, newArticles);
+  } catch (error) {
+    console.log(`YouTube queue error: ${error}`);
+  }
 
   const toSend = newArticles.slice(0, MAX_SEND_PER_RUN);
 
@@ -637,6 +721,103 @@ async function handleStop(env, chatId) {
 
 export default {
   async fetch(request, env) {
+    const url = new URL(request.url);
+
+    // Secure local YouTube queue API
+    if (url.pathname === "/youtube-queue") {
+      const token = request.headers.get("X-Matchwire-Queue-Token");
+
+      if (!token || token !== env.YOUTUBE_QUEUE_TOKEN) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          {
+            status: 401,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
+
+      if (request.method === "GET") {
+        const queue = await getYouTubeQueue(env);
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            queue,
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
+
+      if (request.method === "POST") {
+        try {
+          const body = await request.json();
+
+          if (
+            body.action === "ack" &&
+            typeof body.key === "string"
+          ) {
+            const queue = await getYouTubeQueue(env);
+            const updated = queue.filter(
+              (article) => article.key !== body.key
+            );
+
+            await saveYouTubeQueue(env, updated);
+
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                remaining: updated.length,
+              }),
+              {
+                status: 200,
+                headers: {
+                  "Content-Type": "application/json",
+                },
+              }
+            );
+          }
+
+          return new Response(
+            JSON.stringify({ error: "Invalid request" }),
+            {
+              status: 400,
+              headers: {
+                "Content-Type": "application/json",
+              },
+            }
+          );
+        } catch {
+          return new Response(
+            JSON.stringify({ error: "Invalid JSON" }),
+            {
+              status: 400,
+              headers: {
+                "Content-Type": "application/json",
+              },
+            }
+          );
+        }
+      }
+
+      return new Response(
+        JSON.stringify({ error: "Method not allowed" }),
+        {
+          status: 405,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+    }
+
     if (request.method !== "POST") {
       return new Response(
         "⚽ MATCHWIRE is online.",

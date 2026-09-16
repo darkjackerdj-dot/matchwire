@@ -22,3 +22,13 @@ youtube_client_secret.json
 # Runtime files
 matchwire_latest.json
 youtube_cron.log
+
+# Matchwire local secrets / runtime / backups
+.youtube_queue_token
+worker_backup_*.js
+matchwire_auto_youtube_backup_*.py
+youtube_news_short_backup_*.py
+youtube_seen.json
+matchwire_latest.json
+matchwire_news_short.mp4
+matchwire_queue_story.json
