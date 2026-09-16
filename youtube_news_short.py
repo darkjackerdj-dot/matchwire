@@ -1,7 +1,10 @@
+import json
+import sys
 import feedparser
 import html
 import re
 import subprocess
+from pathlib import Path
 import textwrap
 from PIL import Image, ImageDraw, ImageFont
 
@@ -454,13 +457,43 @@ def create_video(slides):
 
     command.extend(inputs)
 
+    # ==========================================
+    # MATCHWIRE BACKGROUND MUSIC
+    # ==========================================
+
+    BGM = "music/matchwire_bgm.mp3"
+
+    audio_input_index = 4
+
+    command.extend([
+        "-stream_loop",
+        "-1",
+        "-i",
+        BGM
+    ])
+
+    filter_complex += (
+        f";[{audio_input_index}:a]"
+        f"volume=0.18,"
+        f"atrim=duration={DURATION},"
+        f"afade=t=in:st=0:d=1,"
+        f"afade=t=out:st={DURATION - 2}:d=2"
+        f"[bgm]"
+    )
+
     command.extend([
         "-filter_complex",
         filter_complex,
+
         "-map",
         "[outv]",
+
+        "-map",
+        "[bgm]",
+
         "-t",
         str(DURATION),
+
         "-c:v",
         "libx264",
         "-preset",
@@ -469,8 +502,15 @@ def create_video(slides):
         "23",
         "-pix_fmt",
         "yuv420p",
+
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+
         "-movflags",
         "+faststart",
+
         OUTPUT
     ])
 
@@ -495,12 +535,28 @@ def main():
     article = get_latest_news()
 
     print()
+    Path("matchwire_latest.json").write_text(
+        json.dumps(
+            {
+                "title": article["title"],
+                "source": article["source"],
+                "link": article["link"]
+            },
+            indent=2
+        )
+    )
+
     print("📰 Selected story:")
     print(article["title"])
     print()
     print("🌐 Source:", article["source"])
     print("🔗 Link:", article["link"])
     print()
+
+    if "--metadata-only" in sys.argv:
+        print("ℹ️ Metadata-only mode: skipping slide/video generation.")
+        print()
+        return
 
     slides = []
 
