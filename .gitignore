@@ -18,3 +18,7 @@ youtube_client_secret.json
 *_backup*.js
 *_backup*.jsonc
 *_backup*.py
+
+# Runtime files
+matchwire_latest.json
+youtube_cron.log
