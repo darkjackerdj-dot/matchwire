@@ -99,18 +99,23 @@ def upload_to_youtube(story):
     source = story["source"].strip()
     link = story["link"].strip()
 
+    # ---------------------------------------------
+    # YouTube SEO metadata
+    # ---------------------------------------------
+
     youtube_title = (
-        f"Matchwire Football News: {title}"
+        f"{title} | Football News"
     )
 
     description = (
-        "⚽ Matchwire Football News\n\n"
-        f"{title}\n\n"
-        f"Source: {source}\n"
-        f"Original story: {link}\n\n"
-        "Follow Matchwire:\n"
+        "⚽ MATCHWIRE — FOOTBALL NEWS\n\n"
+        f"📰 {title}\n\n"
+        f"🌐 Source: {source}\n"
+        f"🔗 Original story: {link}\n\n"
+        "📲 Follow Matchwire for football news and updates:\n"
         "@matchwirenews\n\n"
-        "#football #soccer #footballnews #Matchwire"
+        "Fast, reliable and source-linked football updates.\n\n"
+        "#Football #FootballNews #Soccer #FootballUpdates #Matchwire #Shorts"
     )
 
     print("🚀 Uploading to YouTube...")
@@ -124,10 +129,15 @@ def upload_to_youtube(story):
                 "description": description,
                 "tags": [
                     "football",
-                    "soccer",
                     "football news",
                     "football updates",
-                    "Matchwire"
+                    "soccer",
+                    "soccer news",
+                    "latest football news",
+                    "football shorts",
+                    "soccer shorts",
+                    "Matchwire",
+                    "Matchwire football"
                 ],
                 "categoryId": "17"
             },
