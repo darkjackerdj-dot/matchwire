@@ -2,4 +2,19 @@
 venv/
 __pycache__/
 *.pyc
-football.db
+
+# YouTube / Google credentials
+youtube_token.json
+youtube_client_secret.json
+
+# Generated videos/images
+*.mp4
+*.png
+
+# Wrangler local files
+.wrangler/
+
+# Local backups
+*_backup*.js
+*_backup*.jsonc
+*_backup*.py

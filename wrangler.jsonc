@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "matchwire",
+  "main": "worker.js",
+  "compatibility_date": "2026-09-15",
+
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    }
+  },
+
+  "kv_namespaces": [
+    {
+      "binding": "MATCHWIRE_KV",
+      "id": "3edd05c07ab84dd2aea21ce8988305ed"
+    }
+  ],
+
+  "triggers": {
+    "crons": [
+      "*/10 * * * *"
+    ]
+  }
+}
