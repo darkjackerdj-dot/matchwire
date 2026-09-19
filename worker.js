@@ -613,7 +613,9 @@ async function processNews(env) {
     const youtubeArticles = newArticles.filter(
       (article) =>
         article.source === "BBC Sport" ||
-        article.source === "ESPN"
+        article.source === "ESPN" ||
+        article.source === "The Guardian" ||
+        article.source === "SoccerNews"
     );
 
     await addToYouTubeQueue(env, youtubeArticles);
