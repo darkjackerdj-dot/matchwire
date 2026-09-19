@@ -404,6 +404,66 @@ async function sendArticle(env, chatId, article) {
 }
 
 
+
+async function sendDiscordArticle(env, article) {
+  if (!env.DISCORD_WEBHOOK_URL) {
+    console.log("Discord webhook secret is not configured.");
+    return false;
+  }
+
+  const embed = {
+    title: article.title,
+    url: article.link,
+    description:
+      `⚽ **${article.source}**\n\n` +
+      "Fresh football news from Matchwire.",
+    footer: {
+      text: "MATCHWIRE • Football News",
+    },
+  };
+
+  if (article.image) {
+    embed.thumbnail = {
+      url: article.image,
+    };
+  }
+
+  try {
+    const response = await fetch(env.DISCORD_WEBHOOK_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username: "MATCHWIRE NEWS",
+        embeds: [embed],
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+
+      console.log(
+        `Discord send failed: HTTP ${response.status} ${text}`
+      );
+
+      return false;
+    }
+
+    console.log(
+      `Discord post sent: ${article.title}`
+    );
+
+    return true;
+  } catch (error) {
+    console.log(
+      `Discord error: ${error}`
+    );
+
+    return false;
+  }
+}
+
 async function getSubscribers(env) {
   const data = await env.MATCHWIRE_KV.get("subscribers");
 
@@ -550,7 +610,17 @@ async function processNews(env) {
   // Cloudflare queue so the local YouTube uploader can
   // catch them up when the PC comes back online.
   try {
-    await addToYouTubeQueue(env, newArticles);
+    const youtubeArticles = newArticles.filter(
+      (article) =>
+        article.source === "BBC Sport" ||
+        article.source === "ESPN"
+    );
+
+    await addToYouTubeQueue(env, youtubeArticles);
+
+    console.log(
+      `YouTube queue candidates: ${youtubeArticles.length}`
+    );
   } catch (error) {
     console.log(`YouTube queue error: ${error}`);
   }
@@ -603,6 +673,18 @@ async function processNews(env) {
           `Telegram error for ${chatId}: ${error}`
         );
       }
+    }
+
+    // Post the same news article to Discord
+    try {
+      await sendDiscordArticle(
+        env,
+        article
+      );
+    } catch (error) {
+      console.log(
+        `Discord posting error: ${error}`
+      );
     }
 
     // Mark as seen only after successful channel posting

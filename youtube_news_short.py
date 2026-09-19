@@ -4,10 +4,11 @@ import feedparser
 import html
 import re
 import subprocess
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 import textwrap
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 # ==========================================
 # MATCHWIRE — ANIMATED NEWS SHORT
@@ -23,21 +24,55 @@ OUTPUT = "matchwire_news_short.mp4"
 FEEDS = [
     ("BBC Sport", "https://feeds.bbci.co.uk/sport/football/rss.xml"),
     ("ESPN", "https://www.espn.com/espn/rss/soccer/news"),
-    ("The Guardian", "https://www.theguardian.com/football/rss"),
-    ("SoccerNews", "https://www.soccernews.com/feed"),
-    ("NYT Soccer", "https://rss.nytimes.com/services/xml/rss/nyt/Soccer.xml"),
-    ("The Hindu Football", "https://www.thehindu.com/sport/football/feeder/default.rss"),
-    ("Sky Sports Football", "https://www.skysports.com/rss/12040"),
 ]
 
 FOOTBALL_WORDS = [
-    "football", "soccer", "premier league",
-    "champions league", "europa league", "uefa",
-    "fifa", "transfer", "manager", "striker",
-    "midfielder", "defender", "goalkeeper",
+    "football", "soccer",
+    "premier league", "champions league",
+    "europa league", "conference league",
+    "world cup", "euro", "euros",
+    "nations league", "qualifier", "qualifiers",
+    "international", "friendly", "fixture", "fixtures",
+    "fa cup", "carabao cup", "efl cup",
+    "championship", "league one", "league two",
+    "bundesliga", "serie a", "serie b",
+    "la liga", "ligue 1",
+    "mls", "nwsl",
+    "afcon", "african cup",
+    "copa america", "copa del rey",
+    "concacaf", "conmebol", "afc",
+    "uefa", "fifa",
+    "transfer", "manager", "coach",
+    "striker", "forward", "winger",
+    "midfielder", "defender", "centre-back",
+    "center-back", "full-back", "goalkeeper",
+    "captain", "player", "players",
+    "goal", "goals", "scored", "scores",
+    "assist", "assists",
+    "match", "matches", "win", "wins",
+    "defeat", "defeated", "draw",
+    "penalty", "penalties", "shootout", "shoot-out",
+    "extra time", "red card", "yellow card",
+    "var", "offside", "clean sheet",
+    "lineup", "line-up", "starting xi",
+    "substitute", "substitution", "squad",
+    "injury", "injured", "fitness",
+    "relegation", "promotion", "playoff", "playoffs",
+    "women's football", "women's",
+    "women football",
+    "youth football", "u21", "u20", "u19", "u18",
     "arsenal", "chelsea", "liverpool",
-    "manchester", "barcelona", "real madrid",
-    "bayern", "psg", "milan", "inter", "juventus"
+    "manchester united", "manchester city",
+    "tottenham", "newcastle", "aston villa",
+    "everton", "west ham", "brighton",
+    "fulham", "crystal palace", "nottingham forest",
+    "wolves", "bournemouth", "brentford",
+    "leeds", "sunderland",
+    "real madrid", "barcelona", "atletico madrid",
+    "bayern", "borussia dortmund",
+    "psg", "paris saint-germain",
+    "juventus", "inter milan", "ac milan",
+    "napoli", "roma", "neymar",
 ]
 
 
@@ -259,6 +294,129 @@ def get_besoccer_news():
     return articles
 
 
+def extract_entry_image(entry):
+    import html as html_lib
+    from urllib.parse import urljoin
+
+    def clean_url(value):
+        if not value:
+            return None
+
+        value = html_lib.unescape(str(value)).strip()
+
+        if value.startswith("//"):
+            value = "https:" + value
+
+        return value
+
+    def check_value(value):
+        if isinstance(value, str):
+            value = clean_url(value)
+
+            if value and any(
+                ext in value.lower()
+                for ext in [".jpg", ".jpeg", ".png", ".webp", ".avif"]
+            ):
+                return value
+
+        if isinstance(value, dict):
+            for key in (
+                "url",
+                "href",
+                "src",
+                "image",
+                "image_url",
+                "imagehref",
+                "content",
+            ):
+                result = check_value(value.get(key))
+                if result:
+                    return result
+
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                result = check_value(item)
+                if result:
+                    return result
+
+        return None
+
+    # media:content
+    result = check_value(entry.get("media_content"))
+    if result:
+        return result
+
+    # media:thumbnail
+    result = check_value(entry.get("media_thumbnail"))
+    if result:
+        return result
+
+    # media:group / nested media data
+    result = check_value(entry.get("media_group"))
+    if result:
+        return result
+
+    # RSS image fields
+    result = check_value(entry.get("image"))
+    if result:
+        return result
+
+    # RSS links / enclosures
+    links = entry.get("links") or []
+
+    for item in links:
+        if not isinstance(item, dict):
+            continue
+
+        href = clean_url(item.get("href"))
+        item_type = str(item.get("type") or "").lower()
+        rel = str(item.get("rel") or "").lower()
+
+        if href and (
+            item_type.startswith("image/")
+            or rel == "enclosure"
+            or any(
+                ext in href.lower()
+                for ext in [".jpg", ".jpeg", ".png", ".webp", ".avif"]
+            )
+        ):
+            return href
+
+    # Search RSS HTML for <img src="...">
+    raw_html = str(
+        entry.get("summary", "")
+        or entry.get("description", "")
+        or entry.get("content", "")
+    )
+
+    img_matches = re.findall(
+        r'<img[^>]+(?:src|data-src|data-original)=[\'"]([^\'"]+)[\'"]',
+        raw_html,
+        re.I
+    )
+
+    for value in img_matches:
+        result = clean_url(value)
+
+        if result:
+            return result
+
+    # Also search HTML for direct image URLs
+    direct_matches = re.findall(
+        r'https?://[^"\']+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"\']*)?',
+        raw_html,
+        re.I
+    )
+
+    for value in direct_matches:
+        result = clean_url(value)
+
+        if result:
+            return result
+
+    return None
+
+
 def get_latest_news():
 
     articles = []
@@ -391,6 +549,7 @@ def get_latest_news():
                     "title": title,
                     "summary": summary,
                     "link": link,
+                    "image": extract_entry_image(entry),
                     "score": score
                 })
 
@@ -402,7 +561,7 @@ def get_latest_news():
     # Add BeSoccer separately.
     # BeSoccer is football-only, so no
     # FOOTBALL_WORDS filter is applied.
-    besoccer_articles = get_besoccer_news()
+    besoccer_articles = []
 
     # Apply the same YouTube duplicate-history protection
     # to BeSoccer stories.
@@ -457,9 +616,191 @@ def get_latest_news():
 # ==========================================
 # CREATE SLIDE
 # ==========================================
+def extract_page_og_image(article_url):
+    """Fetch the article page and extract og:image / twitter:image."""
+
+    if not article_url:
+        return None
+
+    try:
+        request = urllib.request.Request(
+            article_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) "
+                    "AppleWebKit/537.36 "
+                    "Chrome/140 Safari/537.36"
+                ),
+                "Accept": (
+                    "text/html,application/xhtml+xml,"
+                    "application/xml;q=0.9,*/*;q=0.8"
+                ),
+            },
+        )
+
+        with urllib.request.urlopen(
+            request,
+            timeout=15
+        ) as response:
+            html = response.read().decode(
+                "utf-8",
+                errors="ignore"
+            )
+
+        patterns = [
+            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)',
+            r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)',
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+        ]
+
+        for pattern in patterns:
+            match = re.search(
+                pattern,
+                html,
+                re.I
+            )
+
+            if match:
+                image_url = match.group(1).strip()
+
+                if image_url.startswith("//"):
+                    image_url = "https:" + image_url
+
+                print(
+                    "🖼️ Article page image found."
+                )
+
+                return image_url
+
+    except Exception as e:
+        print(
+            f"⚠️ Article page image lookup failed: {e}"
+        )
+
+    return None
+
+
+def load_article_image(article):
+    cached = article.get("_image_path")
+
+    if cached and Path(cached).exists():
+        return cached
+
+    image_url = article.get("image")
+
+    # RSS image is missing on some ESPN stories.
+    # Fall back to the article page's og:image.
+    if not image_url:
+        image_url = extract_page_og_image(
+            article.get("link", "")
+        )
+
+        if image_url:
+            article["image"] = image_url
+
+    if not image_url:
+        return None
+
+    try:
+        request = urllib.request.Request(
+            image_url,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "image/avif,image/webp,image/jpeg,image/png,*/*",
+            },
+        )
+
+        with urllib.request.urlopen(
+            request,
+            timeout=15
+        ) as response:
+            content_type = (
+                response.headers.get("Content-Type") or ""
+            ).lower()
+
+            if not content_type.startswith("image/"):
+                return None
+
+            data = response.read(8 * 1024 * 1024)
+
+        temp_path = Path("matchwire_article_image.jpg")
+
+        with temp_path.open("wb") as f:
+            f.write(data)
+
+        # Validate + convert to JPEG so ffmpeg/Pillow gets a predictable file.
+        source_img = Image.open(temp_path).convert("RGB")
+
+        source_img.save(
+            temp_path,
+            "JPEG",
+            quality=90
+        )
+
+        article["_image_path"] = str(temp_path)
+
+        print("🖼️ Article image loaded.")
+        return str(temp_path)
+
+    except Exception as e:
+        print(f"⚠️ Article image unavailable: {e}")
+        return None
+
+
+def draw_article_image(draw, image_path, top=120, bottom=1800, darken=120):
+    if not image_path:
+        return False
+
+    try:
+        img = Image.open(image_path).convert("RGB")
+
+        available_h = bottom - top
+
+        fitted = ImageOps.fit(
+            img,
+            (WIDTH, available_h),
+            method=Image.Resampling.LANCZOS,
+            centering=(0.5, 0.5)
+        )
+
+        overlay = Image.new(
+            "RGBA",
+            fitted.size,
+            (0, 0, 0, darken)
+        )
+
+        fitted = fitted.convert("RGBA")
+        fitted.alpha_composite(overlay)
+
+        image_pos = (0, top)
+
+        # Replace existing background with the article visual.
+        canvas = Image.new(
+            "RGBA",
+            (WIDTH, HEIGHT),
+            (8, 13, 18, 255)
+        )
+
+        canvas.alpha_composite(
+            fitted,
+            image_pos
+        )
+
+        return canvas.convert("RGB")
+
+    except Exception as e:
+        print(f"⚠️ Image render failed: {e}")
+        return False
+
+
 
 def create_slide(index, article):
 
+    image_path = load_article_image(article)
+
+    # Keep the entire page on the clean Matchwire dark background.
+    # The article image is shown ONLY inside the dedicated image box
+    # on the first news slide.
     img = Image.new(
         "RGB",
         (WIDTH, HEIGHT),
@@ -468,207 +809,241 @@ def create_slide(index, article):
 
     draw = ImageDraw.Draw(img)
 
-    # Subtle background
-    for y in range(HEIGHT):
-        value = int(
-            8 + (y / HEIGHT) * 13
-        )
+    # Strong dark bottom/top readability overlays
+    draw.rectangle(
+        (0, 0, WIDTH, 260),
+        fill=(8, 13, 18, 230)
+    )
 
-        draw.line(
-            [(0, y), (WIDTH, y)],
-            fill=(value, value + 5, value + 9)
-        )
+    draw.rectangle(
+        (0, 1480, WIDTH, HEIGHT),
+        fill=(8, 13, 18, 235)
+    )
 
-    # Top accent
+    # Matchwire accents
     draw.rectangle(
         (60, 80, 1020, 88),
         fill=(0, 220, 195)
     )
 
-    # Bottom accent
     draw.rectangle(
         (60, 1832, 1020, 1840),
         fill=(0, 220, 195)
     )
 
-    brand = font(70, True)
-    label = font(36, True)
-    title_font = font(60, True)
-    body = font(38)
-    small = font(30)
+    brand = font(66, True)
+    label = font(34, True)
+    title_font = font(54, True)
+    body = font(34)
+    small = font(28)
+
+    title_lines = wrap_lines(
+        article["title"],
+        25
+    )[:6]
 
     # ======================================
-    # SLIDE 1 — BREAKING
+    # SLIDE 1 — NEWS FIRST
     # ======================================
 
     if index == 1:
 
-        centered(
-            draw,
-            "MATCHWIRE",
-            260,
-            brand,
-            (240, 245, 245)
-        )
-
-        centered(
-            draw,
-            "FOOTBALL NEWS",
-            390,
-            label,
-            (0, 220, 195)
-        )
-
-        centered(
-            draw,
-            "LATEST UPDATE",
-            650,
-            font(52, True),
-            (240, 240, 240)
-        )
-
-        centered(
-            draw,
-            article["source"].upper(),
-            760,
-            label,
-            (170, 180, 185)
-        )
-
-        centered(
-            draw,
-            "NEWS ALERT",
-            1080,
-            font(74, True),
-            (0, 220, 195)
-        )
-
-        centered(
-            draw,
-            "Stay updated.",
-            1200,
-            body,
-            (220, 225, 228)
-        )
-
-        centered(
-            draw,
-            "Stay informed.",
-            1260,
-            body,
-            (220, 225, 228)
-        )
-
-    # ======================================
-    # SLIDE 2 — HEADLINE
-    # ======================================
-
-    elif index == 2:
-
         draw.text(
-            (90, 250),
-            "HEADLINE",
+            (70, 135),
+            "⚡ NEWS ALERT",
             font=label,
             fill=(0, 220, 195)
         )
 
-        lines = wrap_lines(
-            article["title"],
-            25
-        )
+        y = 420
 
-        y = 450
-
-        for line in lines[:7]:
-
+        for line in title_lines:
             centered(
                 draw,
                 line,
                 y,
                 title_font,
-                (245, 248, 248)
+                (250, 252, 252)
             )
-
-            y += 92
-
-        draw.rectangle(
-            (150, y + 60, 930, y + 65),
-            fill=(0, 220, 195)
-        )
+            y += 82
 
         centered(
             draw,
-            article["source"],
-            y + 120,
+            article["source"].upper(),
+            1550,
             small,
-            (170, 180, 185)
+            (190, 200, 203)
+        )
+
+        # ======================================
+        # ARTICLE IMAGE — AFTER HEADLINE
+        # ======================================
+        if image_path:
+            try:
+                article_img = Image.open(
+                    image_path
+                ).convert("RGB")
+
+                image_top = y + 25
+                image_bottom = 1430
+                image_width = 940
+                image_height = max(
+                    220,
+                    image_bottom - image_top
+                )
+
+                fitted = ImageOps.fit(
+                    article_img,
+                    (image_width, image_height),
+                    method=Image.Resampling.LANCZOS,
+                    centering=(0.5, 0.5)
+                )
+
+                # Slight dark overlay for a premium look
+                fitted_rgba = fitted.convert("RGBA")
+
+                overlay = Image.new(
+                    "RGBA",
+                    fitted_rgba.size,
+                    (0, 0, 0, 25)
+                )
+
+                fitted_rgba.alpha_composite(
+                    overlay
+                )
+
+                img.paste(
+                    fitted_rgba.convert("RGB"),
+                    (70, image_top)
+                )
+
+                # Image border
+                draw.rounded_rectangle(
+                    (
+                        70,
+                        image_top,
+                        70 + image_width,
+                        image_top + image_height
+                    ),
+                    radius=24,
+                    outline=(0, 220, 195),
+                    width=4
+                )
+
+            except Exception as e:
+                print(
+                    f"⚠️ Slide image placement failed: {e}"
+                )
+
+
+        centered(
+            draw,
+            "MATCHWIRE",
+            1640,
+            brand,
+            (245, 248, 248)
         )
 
     # ======================================
-    # SLIDE 3 — MATCHWIRE BRIEF
+    # SLIDE 2 — IMAGE + HEADLINE
+    # ======================================
+
+    elif index == 2:
+
+        draw.text(
+            (70, 150),
+            "LATEST FOOTBALL NEWS",
+            font=label,
+            fill=(0, 220, 195)
+        )
+
+        y = 1420
+
+        for line in title_lines:
+            centered(
+                draw,
+                line,
+                y,
+                font(46, True),
+                (248, 250, 250)
+            )
+            y += 68
+
+    # ======================================
+    # SLIDE 3 — WHAT HAPPENED
     # ======================================
 
     elif index == 3:
 
         draw.text(
-            (90, 250),
-            "MATCHWIRE BRIEF",
+            (70, 150),
+            "WHAT HAPPENED",
             font=label,
             fill=(0, 220, 195)
         )
 
-        centered(
-            draw,
-            "WHAT YOU NEED TO KNOW",
-            470,
-            font(50, True),
-            (240, 245, 245)
-        )
+        # Use the real feed summary when available.
+        summary = article.get("summary", "").strip()
 
-        brief = [
-            "A new football story",
-            "has been reported.",
-            "",
-            "Matchwire gives you",
-            "the key headline quickly,",
-            "with a direct source link."
-        ]
+        if summary:
+            summary_lines = wrap_lines(
+                summary,
+                42
+            )[:8]
 
-        y = 700
+            y = 430
 
-        for line in brief:
-
-            if not line:
-                y += 35
-                continue
+            for line in summary_lines:
+                centered(
+                    draw,
+                    line,
+                    y,
+                    body,
+                    (238, 242, 244)
+                )
+                y += 62
+        else:
+            centered(
+                draw,
+                "Latest football update",
+                620,
+                font(48, True),
+                (240, 245, 245)
+            )
 
             centered(
                 draw,
-                line,
-                y,
+                "from Matchwire.",
+                700,
                 body,
                 (215, 222, 225)
             )
 
-            y += 70
+        centered(
+            draw,
+            f"Source: {article['source']}",
+            1580,
+            small,
+            (180, 190, 194)
+        )
 
     # ======================================
-    # SLIDE 4 — SOURCE / CTA
+    # SLIDE 4 — MATCHWIRE CTA
     # ======================================
 
     else:
 
         centered(
             draw,
-            "READ THE FULL STORY",
-            500,
-            font(54, True),
-            (240, 245, 245)
+            "MATCHWIRE",
+            520,
+            font(76, True),
+            (245, 248, 248)
         )
 
         centered(
             draw,
-            "ORIGINAL SOURCE",
+            "SOURCE-LINKED FOOTBALL NEWS",
             650,
             label,
             (0, 220, 195)
@@ -676,32 +1051,32 @@ def create_slide(index, article):
 
         centered(
             draw,
-            article["source"],
-            760,
+            "Read the full story",
+            850,
             font(48, True),
-            (230, 235, 237)
+            (238, 242, 244)
         )
 
         centered(
             draw,
-            "Follow Matchwire",
-            1120,
-            font(60, True),
+            article["source"],
+            960,
+            font(42, True),
+            (205, 212, 215)
+        )
+
+        centered(
+            draw,
+            "Follow @matchwirenews",
+            1190,
+            font(54, True),
             (240, 245, 245)
         )
 
         centered(
             draw,
-            "@matchwirenews",
-            1230,
-            font(42),
-            (0, 220, 195)
-        )
-
-        centered(
-            draw,
-            "FAST  •  RELIABLE  •  SOURCE-LINKED",
-            1450,
+            "FAST  •  FOOTBALL  •  SOURCE-LINKED",
+            1335,
             small,
             (190, 200, 203)
         )
@@ -709,7 +1084,7 @@ def create_slide(index, article):
         centered(
             draw,
             "Football news, without the noise.",
-            1540,
+            1450,
             body,
             (220, 225, 228)
         )

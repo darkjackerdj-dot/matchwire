@@ -292,24 +292,22 @@ def main():
     print("=================================")
     print()
 
-    # -------------------------------------------------
-    # STEP 1: Check Cloudflare YouTube queue
-    # -------------------------------------------------
+    # Keep processing queued stories until:
+    # - the queue is empty, or
+    # - an upload/error stops the process.
+    while True:
 
-    try:
-        queue = fetch_youtube_queue()
-    except Exception as e:
-        print(f"⚠️ Could not read YouTube queue: {e}")
-        print()
-        return
+        try:
+            queue = fetch_youtube_queue()
+        except Exception as e:
+            print(f"⚠️ Could not read YouTube queue: {e}")
+            return
 
-    print(f"📦 YouTube queue: {len(queue)} stories")
+        print(f"📦 YouTube queue: {len(queue)} stories")
 
-    # -------------------------------------------------
-    # STEP 2: If queue has stories, process the oldest
-    # -------------------------------------------------
-
-    if queue:
+        if not queue:
+            print("📭 Queue empty. Nothing to upload.")
+            return
 
         story = queue[0]
 
@@ -317,7 +315,6 @@ def main():
 
         if not all(field in story for field in required):
             print("⚠️ Invalid queue story. Leaving queue unchanged.")
-            print()
             return
 
         story_key = story["key"]
@@ -329,36 +326,27 @@ def main():
         print("🔗", story["link"])
         print()
 
-        # -------------------------------------------------
-        # STEP 3: Local duplicate safety check
-        # -------------------------------------------------
-
+        # Local duplicate safety
         seen = load_seen()
 
         if story_key in seen:
-            print("⏭️ Story already exists in local YouTube history.")
-            print("🧹 Removing it from Cloudflare queue.")
+            print("⏭️ Already uploaded locally.")
+            print("🧹 Removing stale queue item.")
 
             try:
                 acknowledge_queue_story(story_key)
             except Exception as e:
                 print(f"⚠️ Queue ACK failed: {e}")
+                return
 
-            print()
-            return
+            continue
 
-        # -------------------------------------------------
-        # STEP 4: Create the EXACT queued story Short
-        # -------------------------------------------------
-
+        # Render exact queued story
         create_news_short(story)
 
-        # -------------------------------------------------
-        # STEP 5: Upload to YouTube
-        # -------------------------------------------------
-
+        # Upload
         try:
-            video_id = upload_to_youtube(story)
+            upload_to_youtube(story)
 
         except HttpError as e:
             error_text = str(e)
@@ -366,115 +354,50 @@ def main():
             if (
                 "uploadLimitExceeded" in error_text
                 or "number of videos they may upload" in error_text
+                or "rateLimitExceeded" in error_text
+                or "Video Uploads per day" in error_text
+                or "Quota exceeded for quota metric" in error_text
             ):
                 print()
-                print("⚠️ YOUTUBE UPLOAD LIMIT REACHED")
-                print("⏸️ Queue story kept for a later run.")
-                print("💾 Story NOT marked as uploaded.")
+                print("⚠️ YOUTUBE UPLOAD QUOTA/LIMIT REACHED")
+                print("⏸️ Queue processing stopped.")
+                print("💾 Current story remains in queue.")
                 print("✅ Service will exit cleanly.")
                 print()
                 return
 
             raise
 
-        # -------------------------------------------------
-        # STEP 6: Mark uploaded locally
-        # -------------------------------------------------
-
-        seen.append(story_key)
-        seen = seen[-500:]
-        save_seen(seen)
-
-        print()
-        print("💾 Story marked as uploaded.")
-
-        # -------------------------------------------------
-        # STEP 7: ACK Cloudflare queue ONLY after upload
-        # -------------------------------------------------
-
-        try:
-            acknowledge_queue_story(story_key)
         except Exception as e:
-            print(f"⚠️ Upload succeeded but queue ACK failed: {e}")
-            print("💡 The next run will detect the local duplicate and ACK it.")
-        else:
-            print("✅ Queue item acknowledged.")
-
-        print("✅ Duplicate protection enabled.")
-        print()
-
-        return
-
-    # -------------------------------------------------
-    # STEP 8: No backlog
-    # -------------------------------------------------
-
-    print("📭 YouTube queue is empty.")
-
-    # Optional normal live-news mode:
-    # only run when there is no Cloudflare backlog.
-    try:
-        story = fetch_latest_story()
-    except Exception as e:
-        print(f"⚠️ Could not read latest football story: {e}")
-        print()
-        return
-
-    if not story:
-        print("⚠️ Could not read latest story.")
-        print()
-        return
-
-    story_key = (
-        story["title"].strip().lower()
-        + "|"
-        + story["link"].strip()
-    )
-
-    seen = load_seen()
-
-    if story_key in seen:
-        print("⏭️ Latest story already uploaded.")
-        print("📰", story["title"])
-        print("💾 No YouTube upload needed.")
-        print()
-        return
-
-    print("🆕 No queue backlog; live story detected.")
-    print("📰", story["title"])
-    print("🌐", story["source"])
-    print("🔗", story["link"])
-    print()
-
-    create_news_short()
-
-    try:
-        upload_to_youtube(story)
-
-    except HttpError as e:
-        error_text = str(e)
-
-        if (
-            "uploadLimitExceeded" in error_text
-            or "number of videos they may upload" in error_text
-        ):
             print()
-            print("⚠️ YOUTUBE UPLOAD LIMIT REACHED")
-            print("⏸️ Upload skipped for this run.")
-            print("💾 Story NOT marked as uploaded.")
+            print(f"❌ YouTube upload failed: {e}")
+            print("💾 Current story remains in queue.")
             print("✅ Service will exit cleanly.")
             print()
             return
 
-        raise
+        # Mark local history only after successful upload
+        seen.append(story_key)
+        seen = seen[-500:]
+        save_seen(seen)
 
-    seen.append(story_key)
-    seen = seen[-500:]
-    save_seen(seen)
+        print("💾 Story marked as uploaded.")
 
-    print("💾 Story marked as uploaded.")
-    print("✅ Duplicate protection enabled.")
-    print()
+        # ACK Cloudflare only after successful upload
+        try:
+            acknowledge_queue_story(story_key)
+        except Exception as e:
+            print(f"⚠️ Upload succeeded but queue ACK failed: {e}")
+            print("⏸️ Stopping to avoid duplicate processing.")
+            return
+
+        print("✅ Queue item acknowledged.")
+        print("✅ Duplicate protection enabled.")
+        print()
+
+        # Immediately continue with the next queued story
+        print("➡️ Checking next queued story...")
+        print()
 
 
 if __name__ == "__main__":
