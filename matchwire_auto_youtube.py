@@ -395,9 +395,11 @@ def main():
         print("✅ Duplicate protection enabled.")
         print()
 
-        # Immediately continue with the next queued story
-        print("➡️ Checking next queued story...")
+        # Process at most ONE successfully uploaded story per run
+        print("🛑 One upload completed. Stopping this run.")
+        print("➡️ Remaining stories will wait for the next scheduled run.")
         print()
+        return
 
 
 if __name__ == "__main__":
