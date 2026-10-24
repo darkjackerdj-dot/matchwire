@@ -105,7 +105,7 @@ def load_seen_titles():
 
 def save_seen_titles(titles):
     temp = TITLE_SEEN_FILE.with_suffix(".tmp")
-    temp.write_text(json.dumps(titles[-1000:], indent=2))
+    temp.write_text(json.dumps(titles, indent=2))
     temp.replace(TITLE_SEEN_FILE)
 
 
