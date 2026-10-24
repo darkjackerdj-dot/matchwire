@@ -1,4 +1,5 @@
 import json
+import re
 import time
 import subprocess
 import urllib.request
@@ -13,6 +14,7 @@ from google.oauth2.credentials import Credentials
 
 VIDEO = Path("matchwire_news_short.mp4")
 SEEN_FILE = Path("youtube_seen.json")
+TITLE_SEEN_FILE = Path("youtube_seen_titles.json")
 METADATA_FILE = Path("matchwire_latest.json")
 
 QUEUE_URL = "https://matchwire.darkjackerdj.workers.dev/youtube-queue"
@@ -81,6 +83,30 @@ def save_seen(seen):
     SEEN_FILE.write_text(
         json.dumps(seen, indent=2)
     )
+
+
+def normalize_story_title(title):
+    title = title.lower()
+    title = re.sub(r"[^a-z0-9]+", " ", title)
+    return " ".join(title.split())
+
+
+def load_seen_titles():
+    if not TITLE_SEEN_FILE.exists():
+        return []
+
+    try:
+        data = json.loads(TITLE_SEEN_FILE.read_text())
+        return data if isinstance(data, list) else []
+    except Exception:
+        print("WARNING: Could not read title history; stopping safely.")
+        raise
+
+
+def save_seen_titles(titles):
+    temp = TITLE_SEEN_FILE.with_suffix(".tmp")
+    temp.write_text(json.dumps(titles[-1000:], indent=2))
+    temp.replace(TITLE_SEEN_FILE)
 
 
 def get_queue_token():
@@ -387,6 +413,24 @@ def main():
 
             continue
 
+        # Prevent duplicate headlines even when article URLs/keys differ.
+        normalized_title = normalize_story_title(story["title"])
+
+        try:
+            seen_titles = load_seen_titles()
+        except Exception:
+            print("Cannot verify title history; refusing upload.")
+            return
+
+        if normalized_title in seen_titles:
+            print("⏭️ Duplicate headline already uploaded; skipping.")
+            try:
+                acknowledge_queue_story(story_key)
+            except Exception as e:
+                print(f"⚠️ Duplicate queue ACK failed: {e}")
+                return
+            continue
+
         # Render exact queued story
         create_news_short(story)
 
@@ -429,7 +473,13 @@ def main():
         seen = seen[-500:]
         save_seen(seen)
 
-        print("💾 Story marked as uploaded.")
+        # Record headline only after a successful YouTube upload.
+        seen_titles = load_seen_titles()
+        if normalized_title not in seen_titles:
+            seen_titles.append(normalized_title)
+            save_seen_titles(seen_titles)
+
+        print("💾 Story and headline marked as uploaded.")
 
         # ACK Cloudflare only after successful upload
         try:

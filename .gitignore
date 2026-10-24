@@ -40,3 +40,9 @@ youtube_client_secret.old.json
 *.before_cooldown_*
 *.debug-backup
 *.save
+
+# YouTube duplicate-title history
+youtube_seen_titles.json
+
+# Local pre-change backups
+*.before_*.bak

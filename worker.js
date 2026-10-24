@@ -622,17 +622,33 @@ async function processNews(env) {
 
   console.log(`New articles: ${newArticles.length}`);
 
-  // Keep newly discovered football stories in the
-  // Cloudflare queue so the local YouTube uploader can
-  // catch them up when the PC comes back online.
+  // Queue eligible articles independently of the general
+  // seen_news tracker, but only after the reset timestamp.
   try {
-    const youtubeArticles = newArticles.filter(
-      (article) =>
-        article.source === "BBC Sport" ||
-        article.source === "ESPN" ||
-        article.source === "The Guardian" ||
-        article.source === "SoccerNews"
+    const resetAfter = await env.MATCHWIRE_KV.get(
+      "youtube_queue_reset_after"
     );
+
+    const youtubeArticles = resetAfter
+      ? articles
+          .filter((article) =>
+            [
+              "BBC Sport",
+              "ESPN",
+              "The Guardian",
+              "SoccerNews",
+            ].includes(article.source)
+          )
+          .filter((article) =>
+            isFreshYouTubeArticle(article, resetAfter)
+          )
+          .map((article) => ({
+            ...article,
+            key: hashString(
+              normalize(article.title) + "|" + article.link
+            ),
+          }))
+      : [];
 
     await addToYouTubeQueue(env, youtubeArticles);
 
