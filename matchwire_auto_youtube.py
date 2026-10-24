@@ -1,4 +1,5 @@
 import json
+import time
 import subprocess
 import urllib.request
 import urllib.error
@@ -17,6 +18,48 @@ METADATA_FILE = Path("matchwire_latest.json")
 QUEUE_URL = "https://matchwire.darkjackerdj.workers.dev/youtube-queue"
 QUEUE_TOKEN_FILE = Path(".youtube_queue_token")
 QUEUE_STORY_FILE = Path("matchwire_queue_story.json")
+
+COOLDOWN_FILE = Path(".youtube_upload_cooldown.json")
+COOLDOWN_SECONDS = 24 * 60 * 60
+
+
+def check_upload_cooldown():
+    if not COOLDOWN_FILE.exists():
+        return False
+
+    try:
+        data = json.loads(COOLDOWN_FILE.read_text())
+        retry_at = float(data["retry_at"])
+    except Exception:
+        print("WARNING: Invalid cooldown marker; preserving it.")
+        print("Please inspect", COOLDOWN_FILE)
+        return True
+
+    remaining = retry_at - time.time()
+
+    if remaining > 0:
+        hours = int(remaining // 3600)
+        minutes = int((remaining % 3600) // 60)
+        print("YouTube upload cooldown is active.")
+        print(f"Retry in approximately {hours}h {minutes}m.")
+        print("Queue remains unchanged; skipping video rendering.")
+        return True
+
+    COOLDOWN_FILE.unlink()
+    print("Upload cooldown expired; attempting upload again.")
+    return False
+
+
+def start_upload_cooldown():
+    data = {
+        "retry_at": time.time() + COOLDOWN_SECONDS,
+        "reason": "YouTube upload limit error",
+    }
+    temp = COOLDOWN_FILE.with_suffix(".tmp")
+    temp.write_text(json.dumps(data, indent=2))
+    temp.replace(COOLDOWN_FILE)
+    print("Cooldown saved for 24 hours.")
+    print("The queued story has not been acknowledged.")
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
@@ -286,6 +329,9 @@ def upload_to_youtube(story):
 
 def main():
 
+    if check_upload_cooldown():
+        return
+
     print()
     print("=================================")
     print("MATCHWIRE AUTO YOUTUBE")
@@ -351,6 +397,7 @@ def main():
         except HttpError as e:
             error_text = str(e)
 
+            print(f"ORIGINAL YOUTUBE API ERROR: {e}", flush=True)
             if (
                 "uploadLimitExceeded" in error_text
                 or "number of videos they may upload" in error_text
@@ -360,6 +407,7 @@ def main():
             ):
                 print()
                 print("⚠️ YOUTUBE UPLOAD QUOTA/LIMIT REACHED")
+                start_upload_cooldown()
                 print("⏸️ Queue processing stopped.")
                 print("💾 Current story remains in queue.")
                 print("✅ Service will exit cleanly.")

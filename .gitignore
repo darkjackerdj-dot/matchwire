@@ -34,3 +34,9 @@ matchwire_news_short.mp4
 matchwire_queue_story.json
 *.jpg
 youtube_client_secret.old.json
+
+# Local debugging backups
+*.before_fresh_reset_*
+*.before_cooldown_*
+*.debug-backup
+*.save

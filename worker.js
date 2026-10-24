@@ -532,27 +532,43 @@ async function saveYouTubeQueue(env, queue) {
   );
 }
 
+function isFreshYouTubeArticle(article, resetAfter) {
+  if (!article.published) return false;
+
+  const publishedAt = Date.parse(article.published);
+  const resetAt = Date.parse(resetAfter);
+
+  if (!Number.isFinite(publishedAt) || !Number.isFinite(resetAt)) {
+    return false;
+  }
+
+  return publishedAt >= resetAt;
+}
+
 async function addToYouTubeQueue(env, articles) {
-  if (!articles.length) {
+  const resetAfter = await env.MATCHWIRE_KV.get("youtube_queue_reset_after");
+
+  if (!resetAfter) {
+    console.log("YouTube queue reset timestamp missing; skipping queue additions.");
     return;
   }
 
-  const queue = await getYouTubeQueue(env);
-  const existing = new Set(
-    queue.map((article) => article.key)
+  const freshArticles = articles.filter((article) =>
+    isFreshYouTubeArticle(article, resetAfter)
   );
 
-  for (const article of articles) {
-    if (existing.has(article.key)) {
-      continue;
-    }
+  const queue = await getYouTubeQueue(env);
+  const existing = new Set(queue.map((article) => article.key));
+
+  for (const article of freshArticles) {
+    if (existing.has(article.key)) continue;
 
     queue.push({
       key: article.key,
       title: article.title,
       source: article.source,
       link: article.link,
-      published: article.published || "",
+      published: article.published,
       image: article.image || null,
       queued_at: new Date().toISOString(),
     });
@@ -563,7 +579,7 @@ async function addToYouTubeQueue(env, articles) {
   await saveYouTubeQueue(env, queue);
 
   console.log(
-    `YouTube queue: ${queue.length} stories stored`
+    `YouTube queue: ${queue.length} stories stored; ${freshArticles.length} passed freshness filter`
   );
 }
 
@@ -843,6 +859,30 @@ export default {
       if (request.method === "POST") {
         try {
           const body = await request.json();
+
+          if (body.action === "clear") {
+            const resetAfter = new Date().toISOString();
+
+            await env.MATCHWIRE_KV.put("youtube_queue", "[]");
+            await env.MATCHWIRE_KV.put(
+              "youtube_queue_reset_after",
+              resetAfter
+            );
+
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                cleared: true,
+                reset_after: resetAfter
+              }),
+              {
+                status: 200,
+                headers: {
+                  "Content-Type": "application/json",
+                },
+              }
+            );
+          }
 
           if (
             body.action === "ack" &&
