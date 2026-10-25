@@ -355,8 +355,9 @@ def upload_to_youtube(story):
 
 def main():
 
-    if check_upload_cooldown():
-        return
+    while check_upload_cooldown():
+        print("Cooldown active; checking again in 5 minutes.")
+        time.sleep(300)
 
     print()
     print("=================================")
@@ -378,8 +379,9 @@ def main():
         print(f"📦 YouTube queue: {len(queue)} stories")
 
         if not queue:
-            print("📭 Queue empty. Nothing to upload.")
-            return
+            print("📭 Queue empty. Checking again in 60 seconds.")
+            time.sleep(60)
+            continue
 
         story = queue[0]
 
@@ -493,11 +495,9 @@ def main():
         print("✅ Duplicate protection enabled.")
         print()
 
-        # Process at most ONE successfully uploaded story per run
-        print("🛑 One upload completed. Stopping this run.")
-        print("➡️ Remaining stories will wait for the next scheduled run.")
+        print("➡️ Upload complete. Checking the next queued story.")
         print()
-        return
+        continue
 
 
 if __name__ == "__main__":

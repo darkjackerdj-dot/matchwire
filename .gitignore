@@ -46,3 +46,6 @@ youtube_seen_titles.json
 
 # Local pre-change backups
 *.before_*.bak
+
+# YouTube runtime state
+.youtube_upload_cooldown.json
