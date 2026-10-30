@@ -355,9 +355,9 @@ def upload_to_youtube(story):
 
 def main():
 
-    while check_upload_cooldown():
-        print("Cooldown active; checking again in 5 minutes.")
-        time.sleep(300)
+    if check_upload_cooldown():
+        print("Cooldown active; exiting. Systemd timer will retry.")
+        return
 
     print()
     print("=================================")
