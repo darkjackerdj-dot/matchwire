@@ -49,3 +49,4 @@ youtube_seen_titles.json
 
 # YouTube runtime state
 .youtube_upload_cooldown.json
+.youtube_upload_cooldown.backup.json
