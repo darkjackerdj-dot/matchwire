@@ -1101,121 +1101,61 @@ def create_slide(index, article):
 # ==========================================
 
 def create_video(slides):
-
-    # Each slide = 7.5 seconds
     duration = 7.5
 
+    if not slides:
+        raise ValueError("No slides provided")
+
+    total_duration = duration * len(slides)
     inputs = []
+    filters = []
 
-    for slide in slides:
-
-        inputs.extend([
-            "-loop",
-            "1",
-            "-t",
-            str(duration),
-            "-i",
-            slide
-        ])
-
-    filter_parts = []
-
-    for i in range(len(slides)):
-
-        filter_parts.append(
-            f"[{i}:v]"
-            f"scale={WIDTH}:{HEIGHT},"
-            f"fps={FPS},"
-            f"format=yuv420p"
-            f"[v{i}]"
+    for i, slide in enumerate(slides):
+        inputs += [
+            "-loop", "1",
+            "-framerate", str(FPS),
+            "-t", str(duration),
+            "-i", slide
+        ]
+        filters.append(
+            f"[{i}:v]scale={WIDTH}:{HEIGHT},fps={FPS},format=yuv420p[v{i}]"
         )
 
-    concat_inputs = "".join(
-        f"[v{i}]" for i in range(len(slides))
+    concat = "".join(f"[v{i}]" for i in range(len(slides)))
+    filters.append(
+        f"{concat}concat=n={len(slides)}:v=1:a=0[outv]"
     )
 
-    filter_parts.append(
-        concat_inputs +
-        f"concat=n={len(slides)}:v=1:a=0[outv]"
-    )
+    audio_index = len(slides)
+    inputs += [
+        "-stream_loop", "-1",
+        "-i", "music/matchwire_bgm.mp3"
+    ]
 
-    filter_complex = ";".join(
-        filter_parts
+    filters.append(
+        f"[{audio_index}:a]volume=0.18,"
+        f"atrim=duration={total_duration},"
+        f"afade=t=in:st=0:d=1,"
+        f"afade=t=out:st={total_duration - 2}:d=2[bgm]"
     )
 
     command = [
-        "ffmpeg",
-        "-y"
+        "ffmpeg", "-hide_banner", "-y",
+        "-threads", "1",
+        *inputs,
+        "-filter_complex", ";".join(filters),
+        "-map", "[outv]", "-map", "[bgm]",
+        "-t", str(total_duration),
+        "-c:v", "libx264", "-threads", "1",
+        "-preset", "veryfast", "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
+        OUTPUT
     ]
 
-    command.extend(inputs)
+    subprocess.run(command, check=True)
 
-    # ==========================================
-    # MATCHWIRE BACKGROUND MUSIC
-    # ==========================================
-
-    BGM = "music/matchwire_bgm.mp3"
-
-    audio_input_index = 4
-
-    command.extend([
-        "-stream_loop",
-        "-1",
-        "-i",
-        BGM
-    ])
-
-    filter_complex += (
-        f";[{audio_input_index}:a]"
-        f"volume=0.18,"
-        f"atrim=duration={DURATION},"
-        f"afade=t=in:st=0:d=1,"
-        f"afade=t=out:st={DURATION - 2}:d=2"
-        f"[bgm]"
-    )
-
-    command.extend([
-        "-filter_complex",
-        filter_complex,
-
-        "-map",
-        "[outv]",
-
-        "-map",
-        "[bgm]",
-
-        "-t",
-        str(DURATION),
-
-        "-c:v",
-        "libx264",
-        "-preset",
-        "medium",
-        "-crf",
-        "23",
-        "-pix_fmt",
-        "yuv420p",
-
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-
-        "-movflags",
-        "+faststart",
-
-        OUTPUT
-    ])
-
-    subprocess.run(
-        command,
-        check=True
-    )
-
-
-# ==========================================
-# MAIN
-# ==========================================
 
 def main():
 
