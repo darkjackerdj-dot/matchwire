@@ -53,3 +53,7 @@ youtube_seen_titles.json
 
 # Backup Google OAuth tokens
 youtube_token.json.old
+
+# Local backups and sensitive credentials
+*.backup
+youtube_token.json*
